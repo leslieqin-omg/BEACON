@@ -25,11 +25,22 @@ class PairSample:
     cluster_id: str
 
 
+def safe_str(val: Any) -> str:
+    """Safely converts potential NaN/None values into empty or clean string."""
+    if val is None or pd.isna(val):
+        return ""
+    s = str(val).strip()
+    return "" if s.lower() == "nan" else s
+
+
 def parse_mask_string(mask_str: Any, length: int) -> np.ndarray:
     """Parses binary mask string (e.g. '000111000') into boolean numpy array."""
-    if not isinstance(mask_str, str) or len(mask_str) == 0:
+    if length <= 0:
+        return np.zeros(0, dtype=bool)
+    clean_str = safe_str(mask_str)
+    if not clean_str:
         return np.ones(length, dtype=bool)
-    arr = np.array([ch == "1" for ch in mask_str[:length]], dtype=bool)
+    arr = np.array([ch == "1" for ch in clean_str[:length]], dtype=bool)
     if arr.size < length:
         arr = np.pad(arr, (0, length - arr.size), constant_values=False)
     return arr
@@ -39,6 +50,7 @@ class BiomoleculePairDataset(Dataset):
     """
     Dataset for paired antibody-antigen screening.
     Supports on-the-fly CDR slicing or full sequence with attention weighting.
+    Handles heavy-only nanobodies / VHH (empty VL) and missing paratope masks gracefully.
     """
     def __init__(
         self,
@@ -57,9 +69,9 @@ class BiomoleculePairDataset(Dataset):
         
         self.samples: List[PairSample] = []
         for row in dataframe.itertuples():
-            vh_seq = getattr(row, "Antibody_VH_AA", "")
-            vl_seq = getattr(row, "Antibody_VL_AA", "")
-            ag_seq = getattr(row, "Antigen_AA", "")
+            vh_seq = safe_str(getattr(row, "Antibody_VH_AA", ""))
+            vl_seq = safe_str(getattr(row, "Antibody_VL_AA", ""))
+            ag_seq = safe_str(getattr(row, "Antigen_AA", ""))
             
             vh_mask = parse_mask_string(getattr(row, "Antibody_VH_Paratope", ""), len(vh_seq))
             vl_mask = parse_mask_string(getattr(row, "Antibody_VL_Paratope", ""), len(vl_seq))
@@ -73,8 +85,12 @@ class BiomoleculePairDataset(Dataset):
             if ag_key not in ag_to_label:
                 ag_to_label[ag_key] = len(ag_to_label)
                 
-            pair_id = str(getattr(row, "Unique_AG_VH_VL_Hash", f"pair_{len(self.samples)}"))
-            cluster_id = str(getattr(row, "Cluster_id", "c0"))
+            pair_id = safe_str(getattr(row, "Unique_AG_VH_VL_Hash", f"pair_{len(self.samples)}"))
+            if not pair_id:
+                pair_id = f"pair_{len(self.samples)}"
+            cluster_id = safe_str(getattr(row, "Cluster_id", "c0"))
+            if not cluster_id:
+                cluster_id = "c0"
             
             self.samples.append(
                 PairSample(
@@ -174,16 +190,15 @@ def collate_padded_batch(batch: Sequence[Dict[str, Any]]) -> Dict[str, torch.Ten
         ag_labels.append(item["antigen_label"])
         
     return {
-        "antigen_feat": ag_feat,
         "antibody_feat": ab_feat,
-        "antigen_mask": ag_mask,
+        "antigen_feat": ag_feat,
         "antibody_mask": ab_mask,
+        "antigen_mask": ag_mask,
         "cdr_mask": cdr_mask,
-        "epitope_mask": epi_mask,
+        "epi_mask": epi_mask, "epitope_mask": epi_mask,
         "antibody_label": torch.tensor(ab_labels, dtype=torch.long),
-        "antigen_label": torch.tensor(ag_labels, dtype=torch.long),
+        "antigen_label": torch.tensor(ag_labels, dtype=torch.long)
     }
-
 
 def create_dataloader(
     dataset: BiomoleculePairDataset,
@@ -202,4 +217,3 @@ def create_dataloader(
         drop_last=shuffle,
         persistent_workers=(num_workers > 0)
     )
-
