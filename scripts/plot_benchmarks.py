@@ -41,7 +41,19 @@ def main():
     print(f"==========================================================================")
 
     aalite_runs = load_experiment_results(args.runs_dir)
-    calm_runs = load_experiment_results(args.calm_dir)
+
+    calm_dir = Path(args.calm_dir)
+    if not calm_dir.exists():
+        for candidate in [
+            Path("/snode1/data_hub1/qinhaifeng/CALM-repro/artifacts/runs"),
+            Path("../CALM-repro/artifacts/runs"),
+            Path("/Users/leslie/Desktop/CALM/artifacts/runs"),
+        ]:
+            if candidate.exists():
+                calm_dir = candidate
+                break
+
+    calm_runs = load_experiment_results(calm_dir)
 
     print(f"[+] Loaded {len(aalite_runs)} BEACON runs: {list(aalite_runs.keys())}")
     print(f"[+] Loaded {len(calm_runs)} CALM baseline runs: {list(calm_runs.keys())}")
