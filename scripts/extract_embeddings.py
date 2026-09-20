@@ -128,8 +128,7 @@ def extract_all(
     else:
         print(f"[*] Antigen embeddings already exist in {ag_dir}, skipping.")
 
-    print("
-[COMPLETE] All residue embeddings extracted and ready for training!")
+    print("\n[COMPLETE] All residue embeddings extracted and ready for training!")
 
 
 if __name__ == "__main__":
