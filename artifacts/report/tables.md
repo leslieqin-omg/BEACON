@@ -1,5 +1,5 @@
 | Split | Setting | Folds | Recall@1 (Mean±CI) | Recall@5 (Mean±CI) | Recall@10 (Mean±CI) | Recall@50 (Mean±CI) | Recall@100 (Mean±CI) | Best Fold Recall@10 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| AG40 | Ab-Ag 40% Cluster Disjoint | 5-Fold | 25.55 ± 1.09% | 40.83 ± 1.84% | 45.62 ± 2.10% | 57.44 ± 2.58% | 64.36 ± 2.84% | 47.51% (Fold 3) |
-| AG60 | Ab-Ag 60% Cluster Disjoint | 5-Fold | 25.84 ± 1.40% | 41.39 ± 0.63% | 46.28 ± 1.05% | 57.69 ± 0.62% | 65.14 ± 1.17% | 47.69% (Fold 1) |
-| AG80 | Ab-Ag 80% Cluster Disjoint | 5-Fold | 25.96 ± 1.50% | 41.24 ± 1.58% | 46.28 ± 1.97% | 57.28 ± 1.97% | 64.83 ± 2.67% | 48.50% (Fold 1) |
+| AG40 | Ab-Ag 40% Cluster Disjoint | 5-Fold |  0.37 ± 0.29% |  1.76 ± 0.70% |  3.26 ± 1.49% | 12.41 ± 2.83% | 22.66 ± 3.81% | 5.28% (Fold 2) |
+| AG60 | Ab-Ag 60% Cluster Disjoint | 5-Fold |  0.60 ± 0.34% |  2.25 ± 1.37% |  3.96 ± 1.70% | 15.58 ± 5.51% | 26.82 ± 7.05% | 5.73% (Fold 3) |
+| AG80 | Ab-Ag 80% Cluster Disjoint | 5-Fold |  1.49 ± 0.38% |  4.46 ± 1.45% |  7.72 ± 2.85% | 19.90 ± 5.39% | 30.91 ± 5.87% | 10.94% (Fold 4) |

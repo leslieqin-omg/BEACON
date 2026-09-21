@@ -31,6 +31,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from beacon.config import BiEncoderConfig, TrainingConfig, load_config
+from beacon.config import EvaluationConfig
 from beacon.data.clustering import build_clusters, subsample
 from beacon.data.dataset import BiomoleculePairDataset, collate_padded_batch
 from beacon.data.embeddings import MemoryMappedEmbeddingStore
@@ -113,6 +114,112 @@ def evaluate_split_retrieval(
     }
 
 
+def build_evaluation_pools(indices, pool_size: int = 256, max_pairs: int = 512, seed: int = 0) -> List[np.ndarray]:
+    """Builds evaluation candidate pools of fixed size (matching CALM protocol)."""
+    rng = np.random.default_rng(seed)
+    order = np.asarray(list(indices), dtype=np.int64)
+    rng.shuffle(order)
+    if max_pairs and int(max_pairs) > 0:
+        order = order[: int(max_pairs)]
+    width = max(2, int(pool_size))
+    pools: List[np.ndarray] = []
+    for start in range(0, order.size, width):
+        block = order[start:start + width]
+        if block.size == width:
+            pools.append(block)
+    if not pools and order.size >= 2:
+        pools.append(order)
+    return pools
+
+
+def extract_split_embeddings(
+    model: BiEncoderScreening,
+    dataset: BiomoleculePairDataset,
+    indices: List[int],
+    device: torch.device
+) -> Dict[str, torch.Tensor]:
+    """Extracts antibody and antigen embeddings and labels for a specific split."""
+    model.eval()
+    sub = Subset(dataset, indices)
+    loader = DataLoader(
+        sub,
+        batch_size=min(len(sub), 256),
+        shuffle=False,
+        collate_fn=collate_padded_batch,
+        num_workers=(4 if device.type == "cuda" else 0),
+        pin_memory=(device.type == "cuda")
+    )
+    all_ab_emb, all_ag_emb = [], []
+    all_ab_lbl, all_ag_lbl = [], []
+
+    with torch.no_grad():
+        for batch in loader:
+            ag_feat = batch["antigen_feat"].to(device, non_blocking=True)
+            ab_feat = batch["antibody_feat"].to(device, non_blocking=True)
+            ag_mask = batch["antigen_mask"].to(device, non_blocking=True)
+            ab_mask = batch["antibody_mask"].to(device, non_blocking=True)
+            cdr_mask = batch["cdr_mask"].to(device, non_blocking=True)
+
+            if device.type == "cuda":
+                with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16):
+                    v_ag = model.encode_antigen(ag_feat, ag_mask)
+                    u_ab = model.encode_antibody(ab_feat, ab_mask, cdr_mask)
+            else:
+                v_ag = model.encode_antigen(ag_feat, ag_mask)
+                u_ab = model.encode_antibody(ab_feat, ab_mask, cdr_mask)
+
+            all_ab_emb.append(u_ab.cpu().float())
+            all_ag_emb.append(v_ag.cpu().float())
+            all_ab_lbl.append(batch["antibody_label"])
+            all_ag_lbl.append(batch["antigen_label"])
+
+    return {
+        "ab_emb": torch.cat(all_ab_emb, dim=0),
+        "ag_emb": torch.cat(all_ag_emb, dim=0),
+        "ab_lbl": torch.cat(all_ab_lbl, dim=0),
+        "ag_lbl": torch.cat(all_ag_lbl, dim=0),
+    }
+
+
+def evaluate_pools_from_embeddings(
+    split_embs: Dict[str, torch.Tensor],
+    pools_local_indices: List[np.ndarray],
+    ks: Tuple[int, ...] = (1, 5, 10, 50, 100)
+) -> Dict[str, Any]:
+    """Computes Recall@K over fixed pools (CALM protocol) using precomputed embeddings."""
+    totals = {"ab_to_ag": {}, "ag_to_ab": {}, "mean": {}}
+    weight = 0
+    for pool_idx in pools_local_indices:
+        idx_t = torch.as_tensor(pool_idx, dtype=torch.long)
+        u_ab = split_embs["ab_emb"][idx_t]
+        v_ag = split_embs["ag_emb"][idx_t]
+        ab_lbl = split_embs["ab_lbl"][idx_t]
+        ag_lbl = split_embs["ag_lbl"][idx_t]
+
+        sim_ab2ag = torch.matmul(u_ab, v_ag.t())
+        pos_ab2ag = positive_mask(ag_lbl)
+        sim_ag2ab = sim_ab2ag.t()
+        pos_ag2ab = positive_mask(ab_lbl)
+
+        r_ab2ag = compute_recall_at_k(sim_ab2ag, pos_ab2ag, ks)
+        r_ag2ab = compute_recall_at_k(sim_ag2ab, pos_ag2ab, ks)
+        p_len = len(pool_idx)
+        for k in ks:
+            totals["ab_to_ag"][k] = totals["ab_to_ag"].get(k, 0.0) + r_ab2ag[k] * p_len
+            totals["ag_to_ab"][k] = totals["ag_to_ab"].get(k, 0.0) + r_ag2ab[k] * p_len
+            totals["mean"][k] = totals["mean"].get(k, 0.0) + 0.5 * (r_ab2ag[k] + r_ag2ab[k]) * p_len
+        weight += p_len
+
+    res = {}
+    for d in totals:
+        res[d] = {k: totals[d][k] / max(weight, 1) for k in totals[d]}
+    res["pairs"] = weight
+    res["pools"] = len(pools_local_indices)
+    res["pool_size"] = len(pools_local_indices[0]) if pools_local_indices else 0
+    res["random_baseline"] = {k: min(1.0, float(k) / float(max(res["pool_size"], 1))) for k in ks}
+    return res
+
+
 def train_single_fold(
     fold_idx: int,
     model_cfg: BiEncoderConfig,
@@ -121,7 +228,9 @@ def train_single_fold(
     split_indices,
     device: torch.device,
     fold_save_dir: Path,
-    ks: Tuple[int, ...] = (1, 5, 10, 50, 100)
+    ks: Tuple[int, ...] = (1, 5, 10, 50, 100),
+    pool_size: int = 256,
+    test_pairs_per_fold: int = 512
 ) -> Dict[str, Any]:
     """Trains a single fold and returns validation/test performance."""
     print("\n" + "=" * 70)
@@ -220,17 +329,31 @@ def train_single_fold(
         if epoch % 5 == 0 or epoch == train_cfg.epochs:
             print(f"  [Fold {fold_idx}] Epoch {epoch:02d}/{train_cfg.epochs:02d} | Loss: {avg_loss:.4f} | Val R@10: {val_r10*100:.2f}% (Best: {best_val_score*100:.2f}% @ Ep{best_epoch})")
 
-    # Load best checkpoint and evaluate on held-out test split
-    print(f"  Evaluating Best Fold {fold_idx} Checkpoint (Epoch {best_epoch}) on Test Set...")
+    # Load best checkpoint and evaluate on held-out test split (both fixed pool and full test split)
+    print(f"  Evaluating Best Fold {fold_idx} Checkpoint (Epoch {best_epoch}) on Test Set (Pool {pool_size} & Full Split)...")
     best_data = torch.load(best_ckpt_path, map_location=device, weights_only=False)
     model.load_state_dict(best_data["model_state"])
-    test_res = evaluate_split_retrieval(model, test_loader, device, ks=ks)
+
+    # 1. Full test split evaluation (N ~ 672 candidates)
+    test_full_res = evaluate_split_retrieval(model, test_loader, device, ks=ks)
+
+    # 2. Fixed pool evaluation (K = 256 candidates, strictly aligned with CALM protocol)
+    test_embs = extract_split_embeddings(model, full_dataset, split_indices.test, device)
+    pools = build_evaluation_pools(
+        range(len(split_indices.test)),
+        pool_size=pool_size,
+        max_pairs=test_pairs_per_fold,
+        seed=fold_idx
+    )
+    test_pool_res = evaluate_pools_from_embeddings(test_embs, pools, ks=ks)
 
     summary = {
         "fold": fold_idx,
         "best_epoch": best_epoch,
         "best_val_r10": float(best_val_score),
-        "test": test_res,
+        "test": test_pool_res,
+        "test_pool": test_pool_res,
+        "test_full": test_full_res,
         "checkpoint_path": str(best_ckpt_path)
     }
     with open(fold_save_dir / f"fold_{fold_idx}_result.json", "w", encoding="utf-8") as f:
@@ -258,6 +381,9 @@ def run_kfold_experiment(
     
     model_cfg = BiEncoderConfig(**raw_cfg.get("model", {}))
     train_cfg = TrainingConfig(**raw_cfg.get("training", {}))
+    eval_cfg_dict = raw_cfg.get("evaluation", {})
+    pool_size = int(eval_cfg_dict.get("pool_size", 256))
+    test_pairs_per_fold = int(eval_cfg_dict.get("test_pairs_per_fold", 512))
     if epochs_override is not None:
         train_cfg.epochs = epochs_override
 
@@ -360,7 +486,9 @@ def run_kfold_experiment(
             split,
             device,
             run_dir,
-            ks=ks
+            ks=ks,
+            pool_size=pool_size,
+            test_pairs_per_fold=test_pairs_per_fold
         )
         fold_outcomes.append(outcome)
 
@@ -372,6 +500,21 @@ def run_kfold_experiment(
             fold_vals = [item["test"][direction][str(k) if str(k) in item["test"][direction] else k] for item in fold_outcomes]
             m, ci = mean_and_ci95(fold_vals)
             summary_stats[direction][str(k)] = {
+                "mean": m,
+                "ci95": ci,
+                "folds": fold_vals
+            }
+
+    summary_full_stats: Dict[str, Dict[str, Any]] = {}
+    for direction in ("ab_to_ag", "ag_to_ab", "mean"):
+        summary_full_stats[direction] = {}
+        for k in ks:
+            fold_vals = [
+                item.get("test_full", item["test"])[direction][str(k) if str(k) in item.get("test_full", item["test"])[direction] else k]
+                for item in fold_outcomes
+            ]
+            m, ci = mean_and_ci95(fold_vals)
+            summary_full_stats[direction][str(k)] = {
                 "mean": m,
                 "ci95": ci,
                 "folds": fold_vals
@@ -397,18 +540,27 @@ def run_kfold_experiment(
         "pairs": len(df),
         "folds": folds_count,
         "device": str(device),
+        "pool_size": pool_size,
+        "random_baseline": {
+            str(k): min(1.0, float(k) / float(pool_size)) for k in ks
+        },
         "best_fold": {
             "fold": best_fold_idx,
             "best_epoch": best_fold_outcome["best_epoch"],
             "test_scores": best_fold_outcome["test"],
+            "test_scores_full": best_fold_outcome.get("test_full", best_fold_outcome["test"]),
             "checkpoint": str(best_overall_dst)
         },
         "summary": summary_stats,
+        "summary_full": summary_full_stats,
         "folds_detail": fold_outcomes
     }
 
     report_path = run_dir / "kfold_summary.json"
     with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(final_report, f, indent=2)
+
+    with open(run_dir / "results.json", "w", encoding="utf-8") as f:
         json.dump(final_report, f, indent=2)
 
     # 6. Display Clean Summary Table

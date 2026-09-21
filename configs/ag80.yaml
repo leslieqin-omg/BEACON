@@ -8,6 +8,10 @@ max_per_cluster: 25
 coverage: 0.4
 parasail_merge: true
 output_dir: artifacts/runs
+evaluation:
+  pool_size: 256
+  test_pairs_per_fold: 512
+  ks: [1, 5, 10, 50, 100]
 model:
   antigen_dim: 1280
   antibody_dim: 512

@@ -43,6 +43,13 @@ def load_config(path: str) -> BiEncoderConfig:
         data = yaml.safe_load(f)
     return BiEncoderConfig(**data.get("model", {}))
 @dataclass
+class EvaluationConfig:
+    pool_size: int = 256
+    test_pairs_per_fold: int = 512
+    ks: tuple = (1, 5, 10, 50, 100)
+
+
+@dataclass
 class KFoldExperimentConfig:
     name: str = "ag40"
     label: str = "Ab-Ag 40% Cluster Disjoint"
@@ -52,6 +59,7 @@ class KFoldExperimentConfig:
     output_dir: str = "artifacts/runs"
     model: BiEncoderConfig = field(default_factory=BiEncoderConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
+    evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
 
 
 def load_kfold_config(path: str) -> KFoldExperimentConfig:
@@ -59,6 +67,7 @@ def load_kfold_config(path: str) -> KFoldExperimentConfig:
         data = yaml.safe_load(f)
     model_cfg = BiEncoderConfig(**data.get("model", {}))
     train_cfg = TrainingConfig(**data.get("training", {}))
+    eval_cfg = EvaluationConfig(**data.get("evaluation", {}))
     return KFoldExperimentConfig(
         name=data.get("name", "ag40"),
         label=data.get("label", "Ab-Ag 40% Cluster Disjoint"),
@@ -67,5 +76,6 @@ def load_kfold_config(path: str) -> KFoldExperimentConfig:
         cluster_on=data.get("cluster_on", "antigen"),
         output_dir=data.get("output_dir", "artifacts/runs"),
         model=model_cfg,
-        training=train_cfg
+        training=train_cfg,
+        evaluation=eval_cfg
     )
