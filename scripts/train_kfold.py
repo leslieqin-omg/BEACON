@@ -273,8 +273,37 @@ def run_kfold_experiment(
     print(f"  Device: {device} | Epochs per fold: {train_cfg.epochs} | Folds: {folds_count}")
     print(f"==========================================================================")
 
-    # 1. Load Stores & Dataframe
-    emb_p = Path(embedding_dir)
+    dataset_candidates = [
+        Path(dataset_path),
+        PROJECT_ROOT / dataset_path,
+        PROJECT_ROOT / "data/calm_dataset.csv",
+        Path("data/calm_dataset.csv"),
+        Path("/Users/leslie/Desktop/CALM/data/calm_dataset.csv"),
+    ]
+    resolved_dataset = next((cand for cand in dataset_candidates if cand.exists()), None)
+    if resolved_dataset is None:
+        raise FileNotFoundError(f"Could not find dataset at {dataset_path} or standard fallback locations.")
+    dataset_path = str(resolved_dataset)
+
+    emb_candidates = [
+        Path(embedding_dir),
+        PROJECT_ROOT / embedding_dir,
+        Path("data/embeddings"),
+        PROJECT_ROOT / "data/embeddings",
+        Path("data/mock_embeddings"),
+        PROJECT_ROOT / "data/mock_embeddings",
+    ]
+    resolved_emb = None
+    for cand in emb_candidates:
+        if cand.exists() and ((cand / "antibody" / "index.json").exists() or (cand / "index.json").exists()):
+            resolved_emb = cand
+            break
+    if resolved_emb is None:
+        resolved_emb = next((cand for cand in emb_candidates if cand.exists()), None)
+    if resolved_emb is None:
+        raise FileNotFoundError(f"Could not find embeddings at {embedding_dir} or standard fallback locations.")
+    emb_p = resolved_emb
+
     ab_path = emb_p / "antibody" if (emb_p / "antibody").exists() else emb_p
     ag_path = emb_p / "antigen" if (emb_p / "antigen").exists() else emb_p
     ab_store = MemoryMappedEmbeddingStore(ab_path)
@@ -411,8 +440,8 @@ def run_kfold_experiment(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="BEACON 5-Fold Cross-Validation & Benchmark")
     parser.add_argument("--config", type=str, default="configs/ag40.yaml", help="Path to config YAML")
-    parser.add_argument("--dataset", type=str, default="/Users/leslie/Desktop/CALM/data/calm_dataset.csv", help="Dataset CSV path")
-    parser.add_argument("--embedding-dir", type=str, default="data/mock_embeddings", help="Directory with memory-mapped embeddings")
+    parser.add_argument("--dataset", type=str, default="data/calm_dataset.csv", help="Dataset CSV path")
+    parser.add_argument("--embedding-dir", type=str, default="data/embeddings", help="Directory with memory-mapped embeddings")
     parser.add_argument("--output-dir", type=str, default="artifacts/runs", help="Output directory")
     parser.add_argument("--epochs", type=int, default=None, help="Epoch override per fold")
     parser.add_argument("--device", type=str, default=None, help="Device override (cuda/cpu/mps)")
