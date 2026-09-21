@@ -13,6 +13,15 @@ else
     PYTHON_BIN="python"
 fi
 
+if ! command -v mmseqs >/dev/null 2>&1; then
+    for cand in "${PYTHON_BIN%/python*}/mmseqs" "${HOME}/.local/bin/mmseqs" "${HOME}/miniconda3/bin/mmseqs" "/opt/miniconda3/bin/mmseqs" "/opt/conda/bin/mmseqs"; do
+        if [ -x "${cand}" ]; then
+            export PATH="$(dirname "${cand}"):${PATH}"
+            break
+        fi
+    done
+fi
+
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 
 echo "=========================================================================="

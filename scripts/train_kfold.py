@@ -337,6 +337,10 @@ def run_kfold_experiment(
 
     clusters = list(assignment.split_clusters)
     print(f"[+] Unique {cluster_on} clusters for splitting: {len(set(clusters))} (backend: {assignment.backend})")
+    if assignment.backend != "mmseqs2":
+        print(f"[!] WARNING: MMseqs2 binary not found in PATH or standard locations.")
+        print(f"[!] Sequence identity clustering ({min_seq_id}) requires MMseqs2.")
+        print(f"[!] Please install mmseqs2 via 'conda install -c bioconda mmseqs2' or set MMSEQS_BIN.")
 
     # 3. Partition into k cluster-disjoint nested folds
     splits = nested_folds(clusters, folds=folds_count, seed=seed)

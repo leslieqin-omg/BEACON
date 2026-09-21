@@ -60,12 +60,26 @@ class UnionFind:
 
 
 def mmseqs_binary() -> Optional[str]:
+    env_bin = os.environ.get("MMSEQS_BIN")
+    if env_bin and Path(env_bin).is_file():
+        return env_bin
     candidate = shutil.which("mmseqs")
     if candidate:
         return candidate
-    for default_path in ("/opt/homebrew/bin/mmseqs", "/usr/local/bin/mmseqs", "/usr/bin/mmseqs"):
-        if Path(default_path).is_file():
-            return default_path
+    search_paths = [
+        Path(sys.prefix) / "bin" / "mmseqs",
+        Path.home() / ".local" / "bin" / "mmseqs",
+        Path("/opt/homebrew/bin/mmseqs"),
+        Path("/usr/local/bin/mmseqs"),
+        Path("/usr/bin/mmseqs"),
+        Path("/opt/conda/bin/mmseqs"),
+        Path("/opt/miniconda3/bin/mmseqs"),
+        Path.home() / "miniconda3" / "bin" / "mmseqs",
+        Path.home() / "anaconda3" / "bin" / "mmseqs",
+    ]
+    for p in search_paths:
+        if p.is_file():
+            return str(p)
     return None
 
 
@@ -302,12 +316,11 @@ def antibody_labels(frame, min_seq_id, coverage, workdir, notes) -> list[str]:
 
 
 def fallback_antigen(frame, notes) -> list[str]:
-    column = frame["Cluster_id"].astype(str)
-    if bool((column.str.len() > 0).all()):
+    if "Cluster_id" in frame.columns and frame["Cluster_id"].notna().all() and frame["Cluster_id"].nunique() > 1:
         notes.append("mmseqs2 unavailable: reusing dataset Cluster_id as antigen clusters")
-        return list(column)
-    notes.append("mmseqs2 unavailable and Cluster_id incomplete: using exact antigen sequence identity")
-    return list(frame["Antigen_AA"])
+        return list(frame["Cluster_id"].astype(str))
+    notes.append("mmseqs2 unavailable: using exact antigen sequence identity")
+    return list(frame["Antigen_AA"].astype(str))
 
 
 def fallback_antibody(frame, notes) -> list[str]:
