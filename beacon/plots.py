@@ -338,68 +338,118 @@ def generate_publication_markdown_table(runs: Dict[str, Dict[str, Any]], ks: Tup
 def plot_full_vs_masked_comparison(
     runs: Dict[str, Dict[str, Any]],
     output_path: str | Path,
-    target_k: int = 10,
-    title: str = "Control Comparison: Full-Length Ab-Ag vs Masked Pa-Ep (Recall@10)"
+    ks: Tuple[int, ...] | int = (1, 5, 10),
+    target_k: Optional[int] = None,
+    title: str = "Bidirectional Retrieval Recall: Full-Length Ab-Ag vs Masked Paratope-Epitope"
 ) -> Path:
     """
-    Plots paired comparison between Full-Length (Ab-Ag) and Masked (Pa-Ep) controls
-    across 40%, 60%, 80% antigen sequence identity clusters.
+    Plots paired comparison between Full-Length (Ab-Ag) and Masked (Pa-Ep) controls,
+    strictly mirroring CALM Figure 3 across 40%, 60%, 80% antigen sequence identity clusters
+    with 95% CI error bars and random baseline line (k/256).
     """
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    splits = ["40", "60", "80"]
-    full_keys = ["ag40", "ag60", "ag80"]
-    masked_keys = ["pa_ep40", "pa_ep60", "pa_ep80"]
+    if target_k is not None:
+        eval_ks = (target_k,)
+    elif isinstance(ks, int):
+        eval_ks = (ks,)
+    else:
+        eval_ks = tuple(ks)
 
-    fig, ax = plt.subplots(figsize=(6.5, 4.2))
-    x = np.arange(len(splits))
-    width = 0.35
+    unmasked_color = "#2f6fb0"  # CALM steel blue
+    masked_color = "#e07a2f"    # CALM deep orange
 
-    full_means, full_cis = [], []
-    masked_means, masked_cis = [], []
+    rows_spec = [
+        ("40%", "ag40", "pa_ep40"),
+        ("60%", "ag60", "pa_ep60"),
+        ("80%", "ag80", "pa_ep80"),
+    ]
+    if "rs_full" in runs or "rs_masked" in runs:
+        rows_spec.append(("RS", "rs_full", "rs_masked"))
 
-    for fk, mk in zip(full_keys, masked_keys):
-        f_item = runs.get(fk, {}).get("summary", {}).get("mean", {}).get(str(target_k), {})
-        full_means.append(f_item.get("mean", 0.0) * 100.0)
-        full_cis.append(f_item.get("ci95", 0.0) * 100.0)
+    n_ks = len(eval_ks)
+    fig, axes = plt.subplots(1, n_ks, figsize=(4.2 * n_ks, 4.0), sharex=True)
+    if n_ks == 1:
+        axes = [axes]
 
-        m_item = runs.get(mk, {}).get("summary", {}).get("mean", {}).get(str(target_k), {})
-        masked_means.append(m_item.get("mean", 0.0) * 100.0)
-        masked_cis.append(m_item.get("ci95", 0.0) * 100.0)
+    width = 0.36
 
-    rects1 = ax.bar(
-        x - width/2, full_means, width, yerr=full_cis, capsize=3.5,
-        label="Full-Length (Ab-Ag)", color="#2E86AB", edgecolor="#222222", linewidth=0.8
-    )
-    rects2 = ax.bar(
-        x + width/2, masked_means, width, yerr=masked_cis, capsize=3.5,
-        label="Masked (Pa-Ep)", color="#F18F01", edgecolor="#222222", linewidth=0.8
-    )
+    for col, k in enumerate(eval_ks):
+        ax = axes[col]
+        labels = []
+        drawn = 0
+        baseline_val = None
+        max_y = 0.0
+        annotations = []
 
-    for rect in rects1:
-        h = rect.get_height()
-        if h > 0:
-            ax.annotate(f"{h:.1f}%", xy=(rect.get_x() + rect.get_width()/2, h),
-                        xytext=(0, 3), textcoords="offset points", ha="center", va="bottom", fontsize=8)
+        for pos, (label, unmasked_name, masked_name) in enumerate(rows_spec):
+            labels.append(label)
+            for offset, (name, color) in enumerate(((unmasked_name, unmasked_color), (masked_name, masked_color))):
+                payload = runs.get(name)
+                if not payload:
+                    continue
+                summary = payload.get("summary", {}).get("mean", {})
+                item = summary.get(str(int(k)))
+                if not item:
+                    continue
 
-    for rect in rects2:
-        h = rect.get_height()
-        if h > 0:
-            ax.annotate(f"{h:.1f}%", xy=(rect.get_x() + rect.get_width()/2, h),
-                        xytext=(0, 3), textcoords="offset points", ha="center", va="bottom", fontsize=8, fontweight="bold")
+                baseline = (payload.get("random_baseline") or {}).get(str(int(k)))
+                if baseline is not None:
+                    baseline_val = float(baseline) * 100.0
+                else:
+                    baseline_val = (float(k) / 256.0) * 100.0
 
-    ax.set_ylabel(f"Recall@{target_k} (%)", fontsize=10)
-    ax.set_title(title, fontsize=11, fontweight="bold", pad=8)
-    ax.set_xticks(x)
-    ax.set_xticklabels([f"{s}% Identity" for s in splits], fontsize=9.5)
-    ax.legend(frameon=False, fontsize=9)
-    ax.grid(axis="y", zorder=1)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
+                centre = pos + (offset - 0.5) * width
+                val = float(item.get("mean", 0.0)) * 100.0
+                err = float(item.get("ci95", 0.0)) * 100.0
 
-    plt.tight_layout()
-    plt.savefig(out_path, bbox_inches="tight")
+                ax.bar(
+                    centre, val, width=width, color=color,
+                    edgecolor="black", linewidth=0.7,
+                    yerr=err, capsize=3.0, zorder=3
+                )
+                drawn += 1
+                top = val + err
+                if top > max_y:
+                    max_y = top
+                annotations.append((centre, top, val))
+
+        if baseline_val is not None:
+            ax.axhline(baseline_val, linestyle="--", color="#555555", linewidth=1.0, zorder=2)
+            ax.text(
+                len(rows_spec) - 0.5, baseline_val,
+                f"k/256 = {baseline_val:.2f}%",
+                fontsize=7, color="#555555", ha="right", va="bottom"
+            )
+            if baseline_val > max_y:
+                max_y = baseline_val
+
+        if drawn > 0 and max_y > 0:
+            ax.set_ylim(bottom=0, top=max_y * 1.22)
+            y_offset = max_y * 0.025
+            for centre, top, val in annotations:
+                ax.text(centre, top + y_offset, f"{val:.2f}%", ha="center", va="bottom", fontsize=6.5, color="#222222")
+
+        ax.set_xticks(range(len(rows_spec)))
+        ax.set_xticklabels(labels)
+        ax.set_title(f"Recall@{k}", fontsize=11, fontweight="bold")
+        ax.set_xlabel("antigen sequence identity threshold", fontsize=9)
+        if col == 0:
+            ax.set_ylabel("Recall (%)", fontsize=10)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.grid(axis="y", linestyle="--", alpha=0.5, zorder=1)
+
+    from matplotlib.patches import Patch
+    handles = [
+        Patch(facecolor=unmasked_color, edgecolor="black", label="full-length Ab-Ag"),
+        Patch(facecolor=masked_color, edgecolor="black", label="masked paratope-epitope"),
+    ]
+    fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False, bbox_to_anchor=(0.5, -0.02))
+    fig.suptitle(title, fontsize=12, fontweight="bold", y=0.98)
+    fig.tight_layout(rect=(0, 0.06, 1, 0.95))
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
-    print(f"[+] Saved Full vs Masked Comparison to: {out_path}")
+    print(f"[+] Saved CALM-style Full vs Masked Figure to: {out_path}")
     return out_path

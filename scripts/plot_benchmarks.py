@@ -91,13 +91,13 @@ def main():
             title="Model Architecture Impact: BEACON vs CALM Baseline (Recall@10)"
         )
 
-    # 4. Figure 4: Dual Control Comparison: Full-Length Ab-Ag vs Masked Pa-Ep
+    # 4. Figure 3 Reproduction: Dual Control Comparison (Full-Length Ab-Ag vs Masked Pa-Ep)
     fig4_path = out_dir / "figure_ab_ag_vs_pa_ep.png"
     plot_full_vs_masked_comparison(
         runs=effective_runs,
         output_path=fig4_path,
-        target_k=10,
-        title="Control Comparison: Full-Length Ab-Ag vs Masked Pa-Ep (Recall@10)"
+        ks=(1, 5, 10),
+        title="Figure 3: Bidirectional Retrieval Recall (Ab-Ag Full-Length vs Pa-Ep Masked, 5-Fold Mean ± 95% CI)"
     )
 
     # 5. Generate Markdown & CSV Tables
