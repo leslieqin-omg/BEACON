@@ -1,6 +1,7 @@
 name: ag80
 label: Ab-Ag 80% Cluster Disjoint
 folds: 5
+mask_mode: none
 min_seq_id: 0.8
 cluster_on: antigen
 subsample_min_seq_id: 0.8

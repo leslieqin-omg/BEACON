@@ -1,0 +1,35 @@
+name: pa_ep80
+label: Pa-Ep 80% Cluster Disjoint
+folds: 5
+mask_mode: interface
+min_seq_id: 0.8
+cluster_on: antigen
+subsample_min_seq_id: 0.8
+max_per_cluster: 25
+coverage: 0.4
+parasail_merge: true
+output_dir: artifacts/runs
+evaluation:
+  pool_size: 256
+  test_pairs_per_fold: 512
+  ks: [1, 5, 10, 50, 100]
+model:
+  antigen_dim: 1280
+  antibody_dim: 512
+  hidden_dim: 512
+  projection_dim: 256
+  num_conv_layers: 2
+  kernel_size: 5
+  dropout: 0.1
+  antibody_pooling: cdr_attention
+  antigen_pooling: attention
+  init_temperature: 0.07
+  learnable_temperature: true
+training:
+  batch_size: 256
+  learning_rate: 0.001
+  weight_decay: 0.05
+  epochs: 50
+  warmup_steps: 200
+  grad_clip_norm: 1.0
+  device: cuda

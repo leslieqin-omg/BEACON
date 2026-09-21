@@ -311,7 +311,7 @@ def generate_publication_markdown_table(runs: Dict[str, Dict[str, Any]], ks: Tup
     sep = ["---"] * len(header)
     rows = [f"| {' | '.join(header)} |", f"| {' | '.join(sep)} |"]
 
-    for name in ("ag40", "ag60", "ag80"):
+    for name in ("ag40", "ag60", "ag80", "pa_ep40", "pa_ep60", "pa_ep80"):
         if name not in runs:
             continue
         r = runs[name]
@@ -333,3 +333,73 @@ def generate_publication_markdown_table(runs: Dict[str, Dict[str, Any]], ks: Tup
         rows.append(f"| {' | '.join(cells)} |")
 
     return "\n".join(rows) + "\n"
+
+
+def plot_full_vs_masked_comparison(
+    runs: Dict[str, Dict[str, Any]],
+    output_path: str | Path,
+    target_k: int = 10,
+    title: str = "Control Comparison: Full-Length Ab-Ag vs Masked Pa-Ep (Recall@10)"
+) -> Path:
+    """
+    Plots paired comparison between Full-Length (Ab-Ag) and Masked (Pa-Ep) controls
+    across 40%, 60%, 80% antigen sequence identity clusters.
+    """
+    out_path = Path(output_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    splits = ["40", "60", "80"]
+    full_keys = ["ag40", "ag60", "ag80"]
+    masked_keys = ["pa_ep40", "pa_ep60", "pa_ep80"]
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.2))
+    x = np.arange(len(splits))
+    width = 0.35
+
+    full_means, full_cis = [], []
+    masked_means, masked_cis = [], []
+
+    for fk, mk in zip(full_keys, masked_keys):
+        f_item = runs.get(fk, {}).get("summary", {}).get("mean", {}).get(str(target_k), {})
+        full_means.append(f_item.get("mean", 0.0) * 100.0)
+        full_cis.append(f_item.get("ci95", 0.0) * 100.0)
+
+        m_item = runs.get(mk, {}).get("summary", {}).get("mean", {}).get(str(target_k), {})
+        masked_means.append(m_item.get("mean", 0.0) * 100.0)
+        masked_cis.append(m_item.get("ci95", 0.0) * 100.0)
+
+    rects1 = ax.bar(
+        x - width/2, full_means, width, yerr=full_cis, capsize=3.5,
+        label="Full-Length (Ab-Ag)", color="#2E86AB", edgecolor="#222222", linewidth=0.8
+    )
+    rects2 = ax.bar(
+        x + width/2, masked_means, width, yerr=masked_cis, capsize=3.5,
+        label="Masked (Pa-Ep)", color="#F18F01", edgecolor="#222222", linewidth=0.8
+    )
+
+    for rect in rects1:
+        h = rect.get_height()
+        if h > 0:
+            ax.annotate(f"{h:.1f}%", xy=(rect.get_x() + rect.get_width()/2, h),
+                        xytext=(0, 3), textcoords="offset points", ha="center", va="bottom", fontsize=8)
+
+    for rect in rects2:
+        h = rect.get_height()
+        if h > 0:
+            ax.annotate(f"{h:.1f}%", xy=(rect.get_x() + rect.get_width()/2, h),
+                        xytext=(0, 3), textcoords="offset points", ha="center", va="bottom", fontsize=8, fontweight="bold")
+
+    ax.set_ylabel(f"Recall@{target_k} (%)", fontsize=10)
+    ax.set_title(title, fontsize=11, fontweight="bold", pad=8)
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"{s}% Identity" for s in splits], fontsize=9.5)
+    ax.legend(frameon=False, fontsize=9)
+    ax.grid(axis="y", zorder=1)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    plt.tight_layout()
+    plt.savefig(out_path, bbox_inches="tight")
+    plt.close(fig)
+    print(f"[+] Saved Full vs Masked Comparison to: {out_path}")
+    return out_path

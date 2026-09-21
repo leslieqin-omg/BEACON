@@ -1,6 +1,7 @@
 name: ag60
 label: Ab-Ag 60% Cluster Disjoint
 folds: 5
+mask_mode: none
 min_seq_id: 0.6
 cluster_on: antigen
 subsample_min_seq_id: 0.8

@@ -52,19 +52,18 @@ class SequenceTower(nn.Module):
     ) -> torch.Tensor:
         """
         features: [B, L, D_in]
-        mask: [B, L]
-        region_weight: [B, L] (optional CDR bias weights)
+        mask: [B, L] (padding mask, 1 for real residue, 0 for pad)
+        region_weight: [B, L] (optional interface mask: CDR/Paratope for Ab, Epitope for Ag)
         Returns: normalized embedding [B, D_out]
         """
         h = self.input_proj(features)
         for conv in self.convs:
             h = conv(h, mask)
             
-        # Optional: inject region weight (e.g. emphasize CDRs)
+        # Optional: inject region weight (e.g. emphasize CDRs or Epitopes)
         if region_weight is not None:
             effective_mask = mask.bool() & (region_weight > 0) if mask is not None else (region_weight > 0)
             if effective_mask.any():
-                # If region specified, pool primarily over region
                 pool_mask = effective_mask
             else:
                 pool_mask = mask
@@ -90,12 +89,13 @@ class BiEncoderScreening(nn.Module):
     """
     Stage 1: Asymmetric Bi-Encoder Screening Model.
     Designed for ultra-fast candidate retrieval and offline vector database indexing.
+    Supports both Full-length (Ab-Ag) and Masked Interface (Pa-Ep) pooling modes.
     """
     def __init__(self, config: BiEncoderConfig):
         super().__init__()
         self.config = config
         
-        # Antigen Tower (Global sequence representation)
+        # Antigen Tower (Global sequence representation or Epitope-focused)
         self.antigen_tower = SequenceTower(
             input_dim=config.antigen_dim,
             hidden_dim=config.hidden_dim,
@@ -106,7 +106,7 @@ class BiEncoderScreening(nn.Module):
             pooling_mode=config.antigen_pooling
         )
         
-        # Antibody Tower (CDR-focused sequence representation)
+        # Antibody Tower (CDR-focused or Full-length sequence representation)
         self.antibody_tower = SequenceTower(
             input_dim=config.antibody_dim,
             hidden_dim=config.hidden_dim,
@@ -124,9 +124,14 @@ class BiEncoderScreening(nn.Module):
         else:
             self.register_buffer("logit_scale", torch.tensor(initial_logit_scale))
 
-    def encode_antigen(self, antigen_feat: torch.Tensor, antigen_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def encode_antigen(
+        self,
+        antigen_feat: torch.Tensor,
+        antigen_mask: Optional[torch.Tensor] = None,
+        epi_mask: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         """Encodes antigen sequence into a compact vector for offline library caching."""
-        return self.antigen_tower(antigen_feat, mask=antigen_mask)
+        return self.antigen_tower(antigen_feat, mask=antigen_mask, region_weight=epi_mask)
 
     def encode_antibody(
         self,
@@ -143,13 +148,14 @@ class BiEncoderScreening(nn.Module):
         antibody_feat: torch.Tensor,
         antigen_mask: Optional[torch.Tensor] = None,
         antibody_mask: Optional[torch.Tensor] = None,
-        cdr_mask: Optional[torch.Tensor] = None
+        cdr_mask: Optional[torch.Tensor] = None,
+        epi_mask: Optional[torch.Tensor] = None
     ) -> Dict[str, torch.Tensor]:
         """
         Calculates symmetric pairwise cosine similarity between paired antibody and antigen batches.
         """
-        v_ag = self.encode_antigen(antigen_feat, antigen_mask)  # [B, D]
-        u_ab = self.encode_antibody(antibody_feat, antibody_mask, cdr_mask)  # [B, D]
+        v_ag = self.encode_antigen(antigen_feat, antigen_mask, epi_mask=epi_mask)  # [B, D]
+        u_ab = self.encode_antibody(antibody_feat, antibody_mask, cdr_mask=cdr_mask)  # [B, D]
         
         # Cosine similarity for true paired items
         paired_sim = (u_ab * v_ag).sum(dim=-1)  # [B]
@@ -165,4 +171,3 @@ class BiEncoderScreening(nn.Module):
             "antibody_embedding": u_ab,
             "logit_scale": logit_scale
         }
-

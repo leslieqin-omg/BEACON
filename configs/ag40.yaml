@@ -1,6 +1,7 @@
 name: ag40
 label: Ab-Ag 40% Cluster Disjoint
 folds: 5
+mask_mode: none
 min_seq_id: 0.4
 cluster_on: antigen
 subsample_min_seq_id: 0.8

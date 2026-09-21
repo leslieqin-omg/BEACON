@@ -61,7 +61,8 @@ def evaluate_split_retrieval(
     model: BiEncoderScreening,
     loader: DataLoader,
     device: torch.device,
-    ks: Tuple[int, ...] = (1, 5, 10, 50, 100)
+    ks: Tuple[int, ...] = (1, 5, 10, 50, 100),
+    mask_mode: str = "none"
 ) -> Dict[str, Any]:
     """Evaluates Recall@K in both directions (Ab->Ag and Ag->Ab) and their mean."""
     model.eval()
@@ -74,15 +75,21 @@ def evaluate_split_retrieval(
             ab_feat = batch["antibody_feat"].to(device, non_blocking=True)
             ag_mask = batch["antigen_mask"].to(device, non_blocking=True)
             ab_mask = batch["antibody_mask"].to(device, non_blocking=True)
-            cdr_mask = batch["cdr_mask"].to(device, non_blocking=True)
+
+            if mask_mode == "interface":
+                cdr_mask = batch["cdr_mask"].to(device, non_blocking=True)
+                epi_mask = batch["epi_mask"].to(device, non_blocking=True)
+            else:
+                cdr_mask = None
+                epi_mask = None
 
             if device.type == "cuda":
                 with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16):
-                    v_ag = model.encode_antigen(ag_feat, ag_mask)
-                    u_ab = model.encode_antibody(ab_feat, ab_mask, cdr_mask)
+                    v_ag = model.encode_antigen(ag_feat, ag_mask, epi_mask=epi_mask)
+                    u_ab = model.encode_antibody(ab_feat, ab_mask, cdr_mask=cdr_mask)
             else:
-                v_ag = model.encode_antigen(ag_feat, ag_mask)
-                u_ab = model.encode_antibody(ab_feat, ab_mask, cdr_mask)
+                v_ag = model.encode_antigen(ag_feat, ag_mask, epi_mask=epi_mask)
+                u_ab = model.encode_antibody(ab_feat, ab_mask, cdr_mask=cdr_mask)
 
             all_ab_emb.append(u_ab.cpu().float())
             all_ag_emb.append(v_ag.cpu().float())
@@ -136,7 +143,8 @@ def extract_split_embeddings(
     model: BiEncoderScreening,
     dataset: BiomoleculePairDataset,
     indices: List[int],
-    device: torch.device
+    device: torch.device,
+    mask_mode: str = "none"
 ) -> Dict[str, torch.Tensor]:
     """Extracts antibody and antigen embeddings and labels for a specific split."""
     model.eval()
@@ -158,15 +166,21 @@ def extract_split_embeddings(
             ab_feat = batch["antibody_feat"].to(device, non_blocking=True)
             ag_mask = batch["antigen_mask"].to(device, non_blocking=True)
             ab_mask = batch["antibody_mask"].to(device, non_blocking=True)
-            cdr_mask = batch["cdr_mask"].to(device, non_blocking=True)
+
+            if mask_mode == "interface":
+                cdr_mask = batch["cdr_mask"].to(device, non_blocking=True)
+                epi_mask = batch["epi_mask"].to(device, non_blocking=True)
+            else:
+                cdr_mask = None
+                epi_mask = None
 
             if device.type == "cuda":
                 with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16):
-                    v_ag = model.encode_antigen(ag_feat, ag_mask)
-                    u_ab = model.encode_antibody(ab_feat, ab_mask, cdr_mask)
+                    v_ag = model.encode_antigen(ag_feat, ag_mask, epi_mask=epi_mask)
+                    u_ab = model.encode_antibody(ab_feat, ab_mask, cdr_mask=cdr_mask)
             else:
-                v_ag = model.encode_antigen(ag_feat, ag_mask)
-                u_ab = model.encode_antibody(ab_feat, ab_mask, cdr_mask)
+                v_ag = model.encode_antigen(ag_feat, ag_mask, epi_mask=epi_mask)
+                u_ab = model.encode_antibody(ab_feat, ab_mask, cdr_mask=cdr_mask)
 
             all_ab_emb.append(u_ab.cpu().float())
             all_ag_emb.append(v_ag.cpu().float())
@@ -230,7 +244,8 @@ def train_single_fold(
     fold_save_dir: Path,
     ks: Tuple[int, ...] = (1, 5, 10, 50, 100),
     pool_size: int = 256,
-    test_pairs_per_fold: int = 512
+    test_pairs_per_fold: int = 512,
+    mask_mode: str = "none"
 ) -> Dict[str, Any]:
     """Trains a single fold and returns validation/test performance."""
     print("\n" + "=" * 70)
@@ -289,12 +304,18 @@ def train_single_fold(
             ab_feat = batch["antibody_feat"].to(device, non_blocking=True)
             ag_mask = batch["antigen_mask"].to(device, non_blocking=True)
             ab_mask = batch["antibody_mask"].to(device, non_blocking=True)
-            cdr_mask = batch["cdr_mask"].to(device, non_blocking=True)
             ab_lbl = batch["antibody_label"].to(device, non_blocking=True)
             ag_lbl = batch["antigen_label"].to(device, non_blocking=True)
 
+            if mask_mode == "interface":
+                cdr_mask = batch["cdr_mask"].to(device, non_blocking=True)
+                epi_mask = batch["epi_mask"].to(device, non_blocking=True)
+            else:
+                cdr_mask = None
+                epi_mask = None
+
             with torch.amp.autocast(device_type=device.type, dtype=torch.bfloat16 if (device.type == "cuda" and torch.cuda.is_bf16_supported()) else torch.float16):
-                out = model(ag_feat, ab_feat, ag_mask, ab_mask, cdr_mask)
+                out = model(ag_feat, ab_feat, ag_mask, ab_mask, cdr_mask=cdr_mask, epi_mask=epi_mask)
                 loss = criterion(out["affinity_matrix"], ab_lbl, ag_lbl)
 
             scaler.scale(loss).backward()
@@ -310,7 +331,7 @@ def train_single_fold(
         avg_loss = total_loss / max(1, steps)
 
         # Quick validation
-        val_res = evaluate_split_retrieval(model, val_loader, device, ks=(10,))
+        val_res = evaluate_split_retrieval(model, val_loader, device, ks=(10,), mask_mode=mask_mode)
         val_r10 = val_res["mean"][10]
 
         if val_r10 > best_val_score:
@@ -335,10 +356,10 @@ def train_single_fold(
     model.load_state_dict(best_data["model_state"])
 
     # 1. Full test split evaluation (N ~ 672 candidates)
-    test_full_res = evaluate_split_retrieval(model, test_loader, device, ks=ks)
+    test_full_res = evaluate_split_retrieval(model, test_loader, device, ks=ks, mask_mode=mask_mode)
 
     # 2. Fixed pool evaluation (K = 256 candidates, strictly aligned with CALM protocol)
-    test_embs = extract_split_embeddings(model, full_dataset, split_indices.test, device)
+    test_embs = extract_split_embeddings(model, full_dataset, split_indices.test, device, mask_mode=mask_mode)
     pools = build_evaluation_pools(
         range(len(split_indices.test)),
         pool_size=pool_size,
@@ -378,6 +399,7 @@ def run_kfold_experiment(
     exp_name = raw_cfg.get("name", "ag40")
     label = raw_cfg.get("label", f"Cluster {exp_name}")
     min_seq_id = float(raw_cfg.get("min_seq_id", 0.4))
+    mask_mode = raw_cfg.get("mask_mode", raw_cfg.get("data", {}).get("mask_mode", "none"))
     
     model_cfg = BiEncoderConfig(**raw_cfg.get("model", {}))
     train_cfg = TrainingConfig(**raw_cfg.get("training", {}))
@@ -396,7 +418,7 @@ def run_kfold_experiment(
 
     print(f"==========================================================================")
     print(f"  BEACON 5-Fold Screening Experiment: {label} ({exp_name})")
-    print(f"  Device: {device} | Epochs per fold: {train_cfg.epochs} | Folds: {folds_count}")
+    print(f"  Device: {device} | Mask Mode: {mask_mode} | Epochs per fold: {train_cfg.epochs} | Folds: {folds_count}")
     print(f"==========================================================================")
 
     dataset_candidates = [
@@ -488,7 +510,8 @@ def run_kfold_experiment(
             run_dir,
             ks=ks,
             pool_size=pool_size,
-            test_pairs_per_fold=test_pairs_per_fold
+            test_pairs_per_fold=test_pairs_per_fold,
+            mask_mode=mask_mode
         )
         fold_outcomes.append(outcome)
 
@@ -534,6 +557,7 @@ def run_kfold_experiment(
         "experiment": exp_name,
         "label": label,
         "min_seq_id": min_seq_id,
+        "mask_mode": mask_mode,
         "clusters": len(set(clusters)),
         "cluster_backend": assignment.backend,
         "cluster_notes": assignment.notes,

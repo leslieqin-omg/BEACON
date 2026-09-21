@@ -21,6 +21,7 @@ from beacon.plots import (
     plot_recall_bars,
     plot_recall_curves,
     plot_calm_vs_aalite_comparison,
+    plot_full_vs_masked_comparison,
     generate_publication_markdown_table
 )
 
@@ -90,7 +91,16 @@ def main():
             title="Model Architecture Impact: BEACON vs CALM Baseline (Recall@10)"
         )
 
-    # 4. Generate Markdown & CSV Tables
+    # 4. Figure 4: Dual Control Comparison: Full-Length Ab-Ag vs Masked Pa-Ep
+    fig4_path = out_dir / "figure_ab_ag_vs_pa_ep.png"
+    plot_full_vs_masked_comparison(
+        runs=effective_runs,
+        output_path=fig4_path,
+        target_k=10,
+        title="Control Comparison: Full-Length Ab-Ag vs Masked Pa-Ep (Recall@10)"
+    )
+
+    # 5. Generate Markdown & CSV Tables
     table_md = generate_publication_markdown_table(effective_runs, ks=(1, 5, 10, 50, 100))
     table_path = out_dir / "tables.md"
     table_path.write_text(table_md, encoding="utf-8")
