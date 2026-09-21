@@ -31,6 +31,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from beacon.config import BiEncoderConfig, TrainingConfig, load_config
+from beacon.data.clustering import build_clusters, subsample
 from beacon.data.dataset import BiomoleculePairDataset, collate_padded_batch
 from beacon.data.embeddings import MemoryMappedEmbeddingStore
 from beacon.data.splits import nested_folds, assert_cluster_disjoint, split_summary
@@ -282,12 +283,31 @@ def run_kfold_experiment(
     print(f"[+] Loaded dataset {dataset_path}: {len(df)} rows")
 
     # 2. Extract antigen clusters (Reuse Cluster_id if available or generate)
-    if "Cluster_id" in df.columns and df["Cluster_id"].notna().all():
-        clusters = list(df["Cluster_id"].astype(str))
-    else:
-        clusters = list(df["Antigen_AA"].astype(str))
+    cluster_on = raw_cfg.get("cluster_on", "antigen")
+    subsample_min_seq_id = float(raw_cfg.get("subsample_min_seq_id", 0.8))
+    coverage = float(raw_cfg.get("coverage", 0.4))
+    max_per_cluster = int(raw_cfg.get("max_per_cluster", 25))
+    parasail_merge = bool(raw_cfg.get("parasail_merge", True))
 
-    print(f"[+] Unique antigen clusters: {len(set(clusters))}")
+    cluster_workdir = run_dir / "cluster_tmp"
+    assignment = build_clusters(
+        df,
+        workdir=cluster_workdir,
+        cluster_on=cluster_on,
+        min_seq_id=min_seq_id,
+        subsample_min_seq_id=subsample_min_seq_id,
+        coverage=coverage,
+        parasail_merge=parasail_merge,
+    )
+    for note in assignment.notes:
+        print(f"[+] [Cluster] {note}")
+
+    if max_per_cluster > 0:
+        df, assignment = subsample(df, assignment, max_per_cluster=max_per_cluster, seed=seed)
+        print(f"[+] [Subsample] Retained {len(df)} rows after capping at {max_per_cluster} per cluster")
+
+    clusters = list(assignment.split_clusters)
+    print(f"[+] Unique {cluster_on} clusters for splitting: {len(set(clusters))} (backend: {assignment.backend})")
 
     # 3. Partition into k cluster-disjoint nested folds
     splits = nested_folds(clusters, folds=folds_count, seed=seed)
@@ -338,6 +358,10 @@ def run_kfold_experiment(
         "experiment": exp_name,
         "label": label,
         "min_seq_id": min_seq_id,
+        "clusters": len(set(clusters)),
+        "cluster_backend": assignment.backend,
+        "cluster_notes": assignment.notes,
+        "pairs": len(df),
         "folds": folds_count,
         "device": str(device),
         "best_fold": {

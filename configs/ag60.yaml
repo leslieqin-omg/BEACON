@@ -3,6 +3,10 @@ label: Ab-Ag 60% Cluster Disjoint
 folds: 5
 min_seq_id: 0.6
 cluster_on: antigen
+subsample_min_seq_id: 0.8
+max_per_cluster: 25
+coverage: 0.4
+parasail_merge: true
 output_dir: artifacts/runs
 model:
   antigen_dim: 1280
