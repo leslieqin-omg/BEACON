@@ -16,20 +16,20 @@ evaluation:
 model:
   antigen_dim: 1280
   antibody_dim: 512
-  hidden_dim: 512
-  projection_dim: 256
+  hidden_dim: 1024
+  projection_dim: 512
   num_conv_layers: 2
   kernel_size: 5
   dropout: 0.1
   antibody_pooling: cdr_attention
   antigen_pooling: attention
-  init_temperature: 0.07
+  init_temperature: 0.2
   learnable_temperature: true
 training:
-  batch_size: 256
+  batch_size: 1024
   learning_rate: 0.001
-  weight_decay: 0.05
-  epochs: 50
+  weight_decay: 0.2
+  epochs: 100
   warmup_steps: 200
   grad_clip_norm: 1.0
   device: cuda

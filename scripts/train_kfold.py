@@ -260,7 +260,7 @@ def train_single_fold(
         batch_size=train_cfg.batch_size,
         shuffle=True,
         collate_fn=collate_padded_batch,
-        drop_last=len(train_sub) > train_cfg.batch_size,
+        drop_last=False,
         num_workers=(4 if device.type == "cuda" else 0),
         pin_memory=(device.type == "cuda")
     )
@@ -330,8 +330,15 @@ def train_single_fold(
         scheduler.step()
         avg_loss = total_loss / max(1, steps)
 
-        # Quick validation
-        val_res = evaluate_split_retrieval(model, val_loader, device, ks=(10,), mask_mode=mask_mode)
+        # Quick validation on fixed candidate pool K=256 (strictly aligned with CALM checkpoint selection protocol)
+        val_embs = extract_split_embeddings(model, full_dataset, split_indices.val, device, mask_mode=mask_mode)
+        val_pools = build_evaluation_pools(
+            range(len(split_indices.val)),
+            pool_size=pool_size,
+            max_pairs=test_pairs_per_fold,
+            seed=fold_idx
+        )
+        val_res = evaluate_pools_from_embeddings(val_embs, val_pools, ks=(10,))
         val_r10 = val_res["mean"][10]
 
         if val_r10 > best_val_score:
@@ -348,7 +355,7 @@ def train_single_fold(
             )
 
         if epoch % 5 == 0 or epoch == train_cfg.epochs:
-            print(f"  [Fold {fold_idx}] Epoch {epoch:02d}/{train_cfg.epochs:02d} | Loss: {avg_loss:.4f} | Val R@10: {val_r10*100:.2f}% (Best: {best_val_score*100:.2f}% @ Ep{best_epoch})")
+            print(f"  [Fold {fold_idx}] Epoch {epoch:02d}/{train_cfg.epochs:02d} | Loss: {avg_loss:.4f} | Val R@10 (Pool {pool_size}): {val_r10*100:.2f}% (Best: {best_val_score*100:.2f}% @ Ep{best_epoch})")
 
     # Load best checkpoint and evaluate on held-out test split (both fixed pool and full test split)
     print(f"  Evaluating Best Fold {fold_idx} Checkpoint (Epoch {best_epoch}) on Test Set (Pool {pool_size} & Full Split)...")

@@ -10,8 +10,8 @@ class BiEncoderConfig:
     antibody_dim: int = 512       # AntiBERTy is 512, ESM-2 8M is 320
     
     # Projection & Embedding space
-    hidden_dim: int = 256
-    projection_dim: int = 128     # Final embedding dimension for vector indexing / cosine similarity
+    hidden_dim: int = 1024
+    projection_dim: int = 512     # Final embedding dimension for vector indexing / cosine similarity
     
     # Encoder architecture
     num_conv_layers: int = 2      # Local 1D depthwise-separable conv layers
@@ -23,17 +23,17 @@ class BiEncoderConfig:
     antigen_pooling: str = "attention"       # "attention", "mean"
     
     # Similarity and Scaling
-    init_temperature: float = 0.07           # Learnable InfoNCE temperature (1/tau)
+    init_temperature: float = 0.2           # Learnable InfoNCE temperature (1/tau)
     learnable_temperature: bool = True
 
 
 @dataclass
 class TrainingConfig:
-    batch_size: int = 32
-    learning_rate: float = 1e-4
-    weight_decay: float = 0.01
-    epochs: int = 20
-    warmup_steps: int = 500
+    batch_size: int = 1024
+    learning_rate: float = 1e-3
+    weight_decay: float = 0.2
+    epochs: int = 100
+    warmup_steps: int = 200
     grad_clip_norm: float = 1.0
     device: str = "cuda"
 
