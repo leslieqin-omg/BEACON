@@ -398,7 +398,8 @@ def run_kfold_experiment(
     epochs_override: int | None = None,
     device_override: str | None = None,
     folds_count: int = 5,
-    seed: int = 0
+    seed: int = 0,
+    batch_size_override: int | None = None
 ):
     with open(config_path, "r", encoding="utf-8") as f:
         raw_cfg = yaml.safe_load(f)
@@ -415,6 +416,8 @@ def run_kfold_experiment(
     test_pairs_per_fold = int(eval_cfg_dict.get("test_pairs_per_fold", 512))
     if epochs_override is not None:
         train_cfg.epochs = epochs_override
+    if batch_size_override is not None:
+        train_cfg.batch_size = batch_size_override
 
     device_str = device_override or train_cfg.device
     device = torch.device(device_str if (device_str.startswith("cuda") and torch.cuda.is_available()) or device_str == "cpu" else ("mps" if torch.backends.mps.is_available() else "cpu"))
@@ -634,6 +637,7 @@ if __name__ == "__main__":
     parser.add_argument("--device", type=str, default=None, help="Device override (cuda/cpu/mps)")
     parser.add_argument("--folds", type=int, default=5, help="Number of folds (default: 5)")
     parser.add_argument("--seed", type=int, default=0, help="Random seed")
+    parser.add_argument("--batch-size", type=int, default=None, help="Batch size override")
     args = parser.parse_args()
 
     run_kfold_experiment(
@@ -644,5 +648,6 @@ if __name__ == "__main__":
         epochs_override=args.epochs,
         device_override=args.device,
         folds_count=args.folds,
-        seed=args.seed
+        seed=args.seed,
+        batch_size_override=args.batch_size
     )

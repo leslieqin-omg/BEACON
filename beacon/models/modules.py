@@ -64,3 +64,21 @@ class GatedAttentivePooling(nn.Module):
         pooled = (x * weights).sum(dim=1)  # [B, D]
         return pooled
 
+
+class ResidualGatedPooling(nn.Module):
+    def __init__(self, dim: int):
+        super().__init__()
+        self.gate = nn.Sequential(
+            nn.Linear(dim, dim // 2),
+            nn.GELU(),
+            nn.Linear(dim // 2, 1)
+        )
+
+    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        gate_weights = torch.sigmoid(self.gate(x))
+        mod_weights = 1.0 + gate_weights
+        if mask is not None:
+            mod_weights = mod_weights * mask.unsqueeze(-1).float()
+        weights_sum = mod_weights.sum(dim=1).clamp_min(1e-6)
+        pooled = (x * mod_weights).sum(dim=1) / weights_sum
+        return pooled

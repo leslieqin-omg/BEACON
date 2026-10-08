@@ -21,12 +21,12 @@ model:
   num_conv_layers: 2
   kernel_size: 5
   dropout: 0.1
-  antibody_pooling: cdr_attention
-  antigen_pooling: attention
+  antibody_pooling: residual_gate
+  antigen_pooling: residual_gate
   init_temperature: 0.2
   learnable_temperature: true
 training:
-  batch_size: 1024
+  batch_size: 256
   learning_rate: 0.001
   weight_decay: 0.2
   epochs: 100

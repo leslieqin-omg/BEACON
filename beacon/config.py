@@ -19,8 +19,8 @@ class BiEncoderConfig:
     dropout: float = 0.1
     
     # Pooling strategy
-    antibody_pooling: str = "cdr_attention"  # "cdr_attention", "cdr_mean", "mean"
-    antigen_pooling: str = "attention"       # "attention", "mean"
+    antibody_pooling: str = "residual_gate"  # "cdr_attention", "cdr_mean", "mean"
+    antigen_pooling: str = "residual_gate"       # "attention", "mean"
     
     # Similarity and Scaling
     init_temperature: float = 0.2           # Learnable InfoNCE temperature (1/tau)
@@ -29,7 +29,7 @@ class BiEncoderConfig:
 
 @dataclass
 class TrainingConfig:
-    batch_size: int = 1024
+    batch_size: int = 256
     learning_rate: float = 1e-3
     weight_decay: float = 0.2
     epochs: int = 100

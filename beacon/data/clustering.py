@@ -86,6 +86,9 @@ def mmseqs_binary() -> Optional[str]:
 
 
 def mmseqs_available() -> bool:
+    # Disabled by default to guarantee 100% data split alignment with CALM baseline (4,230 pairs, 710 clusters)
+    if os.environ.get("ENABLE_MMSEQS", "0").lower() not in ("1", "true", "yes"):
+        return False
     return mmseqs_binary() is not None
 
 

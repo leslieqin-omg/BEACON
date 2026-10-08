@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from typing import Optional, Dict, Tuple
 
 from beacon.config import BiEncoderConfig
-from beacon.models.modules import DepthwiseSeparableConv1d, GatedAttentivePooling
+from beacon.models.modules import DepthwiseSeparableConv1d, GatedAttentivePooling, ResidualGatedPooling
 
 
 class SequenceTower(nn.Module):
@@ -25,6 +25,7 @@ class SequenceTower(nn.Module):
     ):
         super().__init__()
         self.input_proj = nn.Sequential(
+            nn.LayerNorm(input_dim),
             nn.Linear(input_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.GELU(),
@@ -36,8 +37,12 @@ class SequenceTower(nn.Module):
         ])
         
         self.pooling_mode = pooling_mode
-        if "attention" in pooling_mode:
+        if "residual" in pooling_mode or "sigmoid" in pooling_mode or "gate" in pooling_mode:
+            self.pooler = ResidualGatedPooling(hidden_dim)
+        elif "attention" in pooling_mode:
             self.pooler = GatedAttentivePooling(hidden_dim)
+        else:
+            self.pooler = None
             
         self.out_proj = nn.Sequential(
             nn.Linear(hidden_dim, output_dim),
@@ -63,14 +68,13 @@ class SequenceTower(nn.Module):
         # Optional: inject region weight (e.g. emphasize CDRs or Epitopes)
         if region_weight is not None:
             effective_mask = mask.bool() & (region_weight > 0) if mask is not None else (region_weight > 0)
-            if effective_mask.any():
-                pool_mask = effective_mask
-            else:
-                pool_mask = mask
+            has_interface = effective_mask.any(dim=1, keepdim=True)
+            base_m = mask.bool() if mask is not None else torch.ones_like(effective_mask)
+            pool_mask = torch.where(has_interface, effective_mask, base_m)
         else:
             pool_mask = mask
 
-        if "attention" in self.pooling_mode:
+        if self.pooler is not None:
             pooled = self.pooler(h, pool_mask)
         else:
             # Masked Mean Pooling
